@@ -1,0 +1,55 @@
+1. 11/01/2025
+    a. [
+    # Elo
+    "elo_diff",
+    "elo_pre_ma5_diff", "elo_pre_slope5_diff", "elo_momentum_diff", "elo_volatility_diff",
+    "elo_x_momentum", "elo_x_rest",
+
+    # Schedule Adjusted
+    "atk_diff", "def_diff",
+    "atk_minus_oppdef", "def_minus_oppatk",
+    "atk_pre_home","def_pre_home","atk_pre_away","def_pre_away","hca_est_pre",
+
+    # possesion stats
+    'off_rtg_roll3_diff', 'off_rtg_roll5_diff',
+    'def_rtg_roll3_diff', 'def_rtg_roll5_diff',
+    'off_def_rtg_diff', 'def_off_rtg_diff',
+
+    # Context / venue / rest
+    "rest_diff", "rw_pct_diff", "streak_diff", "spdiff_diff",
+    "hvenue_winpct_diff", "hvenue_pdiff_diff",
+    "b2b_home", "b2b_away",
+    "momentum_index",
+
+    # Four factors
+    'ff_prev_diff', 'ff_roll3_diff', 'ff_roll5_diff',
+
+    # Prev (lag-1) diffs
+    'PLUS_MINUS_prev_diff','off_rtg_prev_diff', 'def_rtg_prev_diff' ,"off_eff_prev_diff", 'def_eff_prev_diff',
+    'pace_prev_diff', "efg_prev_diff", "tov_rate_prev_diff", "reb_rate_prev_diff", "ft_eff_prev_diff", 'ast_tov_ratio_prev_diff',
+
+    # Rolling 3 & 5 (shifted)
+    'pace_roll3_diff', 'pace_roll5_diff',
+    'ast_tov_ratio_roll3_diff', 'ast_tov_ratio_roll5_diff',
+    'PLUS_MINUS_roll3_diff', 'PLUS_MINUS_roll5_diff',
+    'fgp_roll3_diff', 'fgp_roll5_diff',
+    'tpp_roll3_diff', 'tpp_roll5_diff',
+    "off_eff_roll3_diff", "off_eff_roll5_diff",
+    'def_eff_roll3_diff', 'def_eff_roll5_diff',
+    "efg_roll3_diff", "efg_roll5_diff",
+    "tov_rate_roll3_diff", "tov_rate_roll5_diff",
+    "reb_rate_roll3_diff", "reb_rate_roll5_diff",
+    "ft_eff_roll3_diff", "ft_eff_roll5_diff",
+    ]
+
+    b. (LR,LR,XGB,XGB,GB,RF,KNN,LSVM) -> LR 
+
+    c.Val Log Loss:  0.6165
+      Val Brier:     0.2140
+      Val AUC:       0.7059
+      Val Accuracy:  0.6536
+      Val ECE:       0.0287
+      TEST Uncal logloss: 0.6206269953927005 | Brier: 0.21572168664939065
+      TEST Calib logloss: 0.6200149153787899 | Brier: 0.21544182155238192
+      TEST AUC (uncal|cal): 0.7068564849096839 0.7068564849096839
+      'log_loss': 0.6210939328728214, 'brier': 0.21595545590205792, 'roc_auc': 0.7057627262310181, 'accuracy@0.5': 0.6537421100090172
