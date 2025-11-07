@@ -871,7 +871,8 @@ def get_todays_games():
 def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False, T=None, b=0.8):
     # --- today & injuries ---
     today_games   = get_todays_games()
-    lost_elo_dict = update_injuries(today_games, T)
+    if INJURIES:
+        lost_elo_dict = update_injuries(today_games, T)
 
     # --- features for today (model-ready) ---
     feat_today = build_today_features(

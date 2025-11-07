@@ -19,11 +19,9 @@ from pred import (
 # -----------------------------
 
 def _parse_target_date(target_date: str | None) -> date:
-    """
-    Accepts 'today' or 'YYYY-MM-DD' (local Pacific time).
-    """
+    """Accepts 'today' or 'YYYY-MM-DD' (local Pacific time)."""
     tz = ZoneInfo("America/Los_Angeles")
-    if not target_date or target_date.lower() == "today":
+    if (not target_date) or (str(target_date).lower() == "today"):
         return datetime.now(tz).date()
     return datetime.fromisoformat(target_date).date()
 

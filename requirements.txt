@@ -17,6 +17,3 @@ cloudpickle
 requests
 certifi
 nba_api
-
-# --- Misc used in pred.py ---
-jpype1
