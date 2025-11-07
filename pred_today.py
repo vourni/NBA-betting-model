@@ -39,7 +39,8 @@ def predict_today(
     kelly_thresh: float = 0.02,
     cap: float = 0.03,
     injury_T: float = 0.25,
-    pool_w: float = 0.80,      # w in logit pooling against no-vig market
+    pool_w: float = 1,      # w in logit pooling against no-vig market
+    injuries: bool = False,
     model_path: str = "./models/elo_model_ensemble_prod.pkl",
     state_path: str = "./states/2025-26_season_state.pkl",
 ):
@@ -126,6 +127,7 @@ def predict_today(
             hist_games=games_hist,
             HCA=state.params["HCA"],
             FEATS=FEATS,
+            INJURIES=injuries,
             T=injury_T,
             b=pool_w,
         )
