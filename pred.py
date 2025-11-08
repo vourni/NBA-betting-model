@@ -12,7 +12,14 @@ from scipy.special import logit, expit
 from nba_api.stats.endpoints import leaguegamefinder
 from utils import load_state
 import re
+import os
 import unicodedata
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 """
@@ -867,13 +874,72 @@ def get_todays_games():
     return df
 
 
-def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False, T=None, b=0.8):
-    # --- today & injuries ---
-    today_games   = get_todays_games()
+def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, 
+                 INJURIES=False, T=None, b=0.8, target_date=None):
+    """
+    Predict today's games with consistent date handling.
+    
+    Parameters
+    ----------
+    target_date : date, optional
+        The date to predict for. If None, uses today in Pacific time.
+    """
+    # Establish single source of truth for "today"
+    if target_date is None:
+        # Default: today in Pacific timezone (where NBA operates)
+        target_date = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    elif isinstance(target_date, (str, int, float, datetime)):
+        # Convert to date if needed
+        if isinstance(target_date, str):
+            target_date = datetime.fromisoformat(target_date).date()
+        elif isinstance(target_date, (int, float)):
+            target_date = datetime.utcfromtimestamp(target_date).date()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+    
+    print(f"[predict_games] Predicting for date: {target_date}", flush=True)
+    
+    # --- Get today's games (with consistent date filter) ---
+    sb = scoreboardv2.ScoreboardV2(game_date=target_date.strftime("%m/%d/%Y"))
+    frames = sb.get_data_frames()
+    if not frames or frames[0].empty:
+        print(f"[predict_games] No games found for {target_date}", flush=True)
+        return pd.DataFrame()
+
+    header = frames[0]
+    today_games = header[[
+        "GAME_ID","GAME_DATE_EST","GAME_STATUS_TEXT","HOME_TEAM_ID","VISITOR_TEAM_ID"
+    ]].copy()
+    today_games["team_home"] = today_games["HOME_TEAM_ID"].map(TEAM_ID_TO_ABBR)
+    today_games["team_away"] = today_games["VISITOR_TEAM_ID"].map(TEAM_ID_TO_ABBR)
+
+    if len(frames) > 1 and not frames[1].empty:
+        lines = frames[1]
+        home = lines[lines["HOME_TEAM_ID"].notna()][["GAME_ID","PTS"]].rename(
+            columns={"PTS":"score_home"}
+        )
+        away = lines[lines["HOME_TEAM_ID"].isna()][["GAME_ID","PTS"]].rename(
+            columns={"PTS":"score_away"}
+        )
+        today_games = today_games.merge(home, on="GAME_ID", how="left").merge(
+            away, on="GAME_ID", how="left"
+        )
+    else:
+        today_games["score_home"] = pd.NA
+        today_games["score_away"] = pd.NA
+
+    today_games["date"] = pd.to_datetime(today_games["GAME_DATE_EST"]).dt.date
+    today_games = today_games.rename(columns={"GAME_STATUS_TEXT":"status"})[
+        ["date","GAME_ID","team_home","team_away","score_home","score_away","status"]
+    ]
+    
+    print(f"[predict_games] Found {len(today_games)} games", flush=True)
+    
+    # --- Injuries (if requested) ---
     if INJURIES:
         lost_elo_dict = update_injuries(today_games, T)
 
-    # --- features for today (model-ready) ---
+    # --- Features for today ---
     feat_today = build_today_features(
         hist_games=hist_games,
         today_games=today_games,
@@ -882,51 +948,129 @@ def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False
     )
 
     def _predict_proba_binary(model, X):
-        # 1) Best case: proper predict_proba
-        if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(X)
-            if proba.ndim == 2 and proba.shape[1] >= 2:
-                return proba[:, 1]
-            if proba.ndim == 1:  # some wrappers
-                return proba
-        # 2) decision_function -> squash to (0,1)
-        if hasattr(model, "decision_function"):
-            return expit(model.decision_function(X))
-        # 3) last resort: predict -> normalize to [0,1]
-        yhat = model.predict(X)
-        yhat = yhat.astype(float)
-        rng = yhat.max() - yhat.min()
-        return (yhat - yhat.min()) / (rng if rng > 0 else 1.0)
+        X_array = np.asarray(X, dtype=np.float64)
+        
+        try:
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(X_array)
+                if proba.ndim == 2 and proba.shape[1] >= 2:
+                    return proba[:, 1]
+                if proba.ndim == 1:
+                    return proba
+        except (SystemError, AttributeError, RuntimeError, ValueError) as e:
+            print(f"[ERROR] predict_proba failed ({type(e).__name__}): {e}", flush=True)
+            try:
+                print(f"[RETRY] Trying with float32...", flush=True)
+                proba = model.predict_proba(X_array.astype(np.float32))
+                if proba.ndim == 2 and proba.shape[1] >= 2:
+                    return proba[:, 1]
+            except Exception as e2:
+                print(f"[ERROR] float32 retry also failed: {e2}", flush=True)
+        
+        try:
+            if hasattr(model, "decision_function"):
+                print(f"[FALLBACK] Using decision_function", flush=True)
+                return expit(model.decision_function(X_array))
+        except Exception as e:
+            print(f"[ERROR] decision_function failed: {e}", flush=True)
+        
+        try:
+            print(f"[FALLBACK] Using predict()", flush=True)
+            yhat = np.asarray(model.predict(X_array), dtype=float)
+            rng = yhat.max() - yhat.min()
+            if rng > 0:
+                return (yhat - yhat.min()) / rng
+            return np.full(len(X_array), 0.5)
+        except Exception as e:
+            print(f"[ERROR] All prediction methods failed: {e}", flush=True)
+            return np.full(len(X_array), 0.5)
     
-    FEATURE_COLS = list(FEATS)
-
-    # Build X with exact training columns; fill missing with 0.0 and coerce numeric
-    X = feat_today.reindex(columns=FEATURE_COLS)
-    missing = [c for c in FEATURE_COLS if c not in feat_today.columns]
+    # Build feature matrix
+    X = feat_today.reindex(columns=FEATS)
+    missing = [c for c in FEATS if c not in feat_today.columns]
     if missing:
-        # optional: print or log once so you can see what's missing in Cloud Run logs
         print(f"[predict_games] Missing features filled with 0: {missing}", flush=True)
-
     X = X.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
-    # Safe probability extraction
+    # Predict
     feat_today["p_home"] = _predict_proba_binary(model, X)
 
-    # --- merge with odds & calibrate ---
-    lines = get_nba_lines("9427c941ebf6ab6828ca2582f82cd24b")
+    # --- Get odds (with consistent date filter) ---
+    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+    params = {
+        "regions": "us",       
+        "markets": "h2h",       
+        "oddsFormat": "american", 
+        "dateFormat": "iso",
+        "apiKey": "9427c941ebf6ab6828ca2582f82cd24b"
+    }
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+
+    rows = []
+    for g in data:
+        gid = g["id"]
+        start = g["commence_time"]
+        home = g["home_team"]
+        away = g["away_team"]
+        
+        # Parse game start time and check if it's on target_date (Pacific time)
+        game_time = pd.to_datetime(start, utc=True).tz_convert(ZoneInfo("America/Los_Angeles"))
+        game_date = game_time.date()
+        
+        if game_date != target_date:
+            continue  # Skip games not on target date
+        
+        for bk in g.get("bookmakers", []):
+            book = bk["title"]
+            if book != "DraftKings":
+                continue
+            
+            for mk in bk.get("markets", []):
+                if mk["key"] != "h2h": 
+                    continue
+                prices = {o["name"]: int(o["price"]) for o in mk["outcomes"]}
+                if home in prices and away in prices:
+                    rows.append({
+                        "game_id": gid,
+                        "commence_time": start,
+                        "home_team": home,
+                        "away_team": away,
+                        "book": book,
+                        "price_home": prices[home],
+                        "price_away": prices[away],
+                    })
+    
+    if not rows:
+        print(f"[predict_games] No odds found for {target_date}", flush=True)
+        return pd.DataFrame()
+    
+    lines = pd.DataFrame(rows)
     lines["team_home"] = lines["home_team"].map(TEAM_MAP)
     lines["team_away"] = lines["away_team"].map(TEAM_MAP)
+    
+    print(f"[predict_games] Found odds for {len(lines)} games", flush=True)
 
+    # --- Merge predictions with odds ---
     merged = lines.merge(
         feat_today[["status", "team_home","team_away","elo_home","elo_away","elo_diff","p_home"]],
         on=["team_home","team_away"],
         how="inner",
         suffixes=("_odds","_feat")
     )
+    
+    if merged.empty:
+        print(f"[predict_games] No matching games after merge", flush=True)
+        return pd.DataFrame()
 
-    merged["nv_p_home"], merged["nv_p_away"] = no_vig_probs(merged["price_home"], merged["price_away"])
+    merged["nv_p_home"], merged["nv_p_away"] = no_vig_probs(
+        merged["price_home"], merged["price_away"]
+    )
+    
     if INJURIES:
         merged['p_home'] = apply_injury_adjustment(merged, lost_elo_dict)
+    
     merged["p_home"] = beta_apply(merged["p_home"], theta)
     merged["p_home"] = apply_logit_pool(merged["p_home"], merged["nv_p_home"], b, 0)
 
@@ -944,7 +1088,7 @@ def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False
     merged["kelly_home"] = merged["EV_home"] / b_home
     merged["kelly_away"] = merged["EV_away"] / b_away
 
-    # --- final cols ---
+    # --- Final output ---
     out = merged[[
         'status', "team_home","team_away",
         "elo_home","elo_away",
@@ -955,8 +1099,10 @@ def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False
         "elo_away":"adj_elo_away"
     })
 
-    out['status'] = out['status'].apply(lambda x: x.rstrip('ET'))
-    out['status'] = out['status'].apply(lambda x: (str(int(x.split(':')[0])-3) + ':' + x.split(':')[1]) + 'PST')
+    out['status'] = out['status'].str.rstrip('ET')
+    out['status'] = out['status'].apply(
+        lambda x: (str(int(x.split(':')[0])-3) + ':' + x.split(':')[1]) + 'PST'
+    )
 
     return out
 
@@ -999,23 +1145,69 @@ Main function
 
 
 def main():
-    try:
-       state = load_state('./states/2025-26_season_state.pkl')
-    except FileNotFoundError:
-        elo_dict = {team:1500 for team in TEAM_MAP.values()}
-    model, theta, FEATS = load_bundle("./models/elo_model_ensemble_prod.pkl", use_cloudpickle=True)
-    print('model loaded')
-    games  = get_games_so_far()
-    games = merge_games(games)
-
-    elo = update_elo_table(state.init_elo, games, state.params['K'], state.params['HCA'], state.params['scale'])
-    print('elo and features updated')
-
-    preds = predict_games(model=model, theta=theta, elo_dict=elo, hist_games=games, HCA=state.params['HCA'], FEATS=FEATS, INJURIES=False, T=0.25, b=1)
-    bets = get_candidates(preds, 0.1, 100)
-    print(bets.to_markdown(index=False))
-    print(preds.to_markdown(index=False))
+    # Use Pacific timezone for consistency (NBA operates in Pacific time)
+    from zoneinfo import ZoneInfo
+    target_date = datetime.now(ZoneInfo("America/Los_Angeles")).date()
     
+    print(f"Running predictions for: {target_date}")
+    
+    try:
+        state = load_state('./states/2025-26_season_state.pkl')
+        print('State loaded')
+    except FileNotFoundError:
+        print('State not found, using defaults')
+        class State:
+            pass
+        state = State()
+        state.init_elo = {team: 1500 for team in TEAM_MAP.values()}
+        state.params = {"K": 20, "HCA": 65, "scale": 400}
+    
+    model, theta, FEATS = load_bundle(
+        "./models/elo_model_ensemble_prod.pkl", 
+        use_cloudpickle=True
+    )
+    print('Model loaded')
+    
+    games = get_games_so_far()
+    games = merge_games(games)
+    print(f'History: {len(games)} games')
+
+    elo = update_elo_table(
+        state.init_elo, games, 
+        state.params['K'], 
+        state.params['HCA'], 
+        state.params['scale']
+    )
+    print('Elo updated')
+
+    preds = predict_games(
+        model=model, 
+        theta=theta, 
+        elo_dict=elo, 
+        hist_games=games, 
+        HCA=state.params['HCA'], 
+        FEATS=FEATS, 
+        INJURIES=False, 
+        T=0.25, 
+        b=1,
+        target_date=target_date  # ← Pass explicit date
+    )
+    
+    if preds.empty:
+        print("No games found for today")
+        return
+    
+    bets = get_candidates(preds, 0.1, 100)
+    
+    print("\n=== BETS ===")
+    if not bets.empty:
+        print(bets[['status', 'bet_side', 'bet_amount']].to_markdown(index=False))
+    else:
+        print("No bets meeting criteria")
+    
+    print("\n=== PREDICTIONS ===")
+    print(preds[['team_home', 'team_away', 'adj_elo_home', 'adj_elo_away', 'p_home', 'nv_p_home', 'price_home', 'price_away', 'EV_home', 'EV_away']].to_markdown(index=False))
+
 
 if __name__ == "__main__":
     main()

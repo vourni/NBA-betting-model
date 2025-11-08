@@ -9,7 +9,7 @@ payload = {
   "kelly_thresh": 0,
   "cap": 0.03,
   "injury_T": 0.25,
-  'INJURIES' : False,
-  "pool_w": 0.8,
+  'injuries' : False,
+  "pool_w": 1,
 }
-print(requests.post(url, json=payload, headers=headers, timeout=30))
+print(requests.post(url, json=payload, headers=headers, timeout=30).json())
