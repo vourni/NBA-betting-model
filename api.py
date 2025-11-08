@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import os, traceback
-from datetime import date, datetime
-from typing import Optional, Any
-
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from datetime import date, datetime
+from typing import Optional, Union, Any
 from pydantic import BaseModel
 
 app = FastAPI(title="NBA Bets API", version="1.0")
@@ -26,8 +26,10 @@ def require_bearer(auth: Optional[str]):
         raise HTTPException(status_code=403, detail="Invalid token")
 
 # ---- Models ----
+
+
 class PredictReq(BaseModel):
-    date: Optional[str] = None            # "today" or "YYYY-MM-DD"
+    date: Optional[Union[str, int, float, date, datetime]] = None   # <— was Optional[str]
     bankroll: float
     kelly_frac: float
     ev_thresh: float

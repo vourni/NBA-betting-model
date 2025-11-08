@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
+from typing import Optional, Union
 
 # ---- import your existing functions/types from your script ----
 # If you rename your big script to nbapred_core.py, import like this:
@@ -18,12 +19,51 @@ from pred import (
 # Small patched helpers (date/env)
 # -----------------------------
 
-def _parse_target_date(target_date: str | None) -> date:
-    """Accepts 'today' or 'YYYY-MM-DD' (local Pacific time)."""
-    tz = ZoneInfo("America/Los_Angeles")
-    if (not target_date) or (str(target_date).lower() == "today"):
-        return datetime.now(tz).date()
-    return datetime.fromisoformat(target_date).date()
+def _parse_target_date(target_date: Optional[Union[str, int, float, date, datetime]]) -> date:
+    """
+    Robustly convert many incoming types to a date.
+    - None or "today"/"now" -> today's date (UTC)
+    - str: ISO "YYYY-MM-DD" (and tries a few common fallbacks)
+    - int/float: treated as Unix epoch seconds
+    - datetime/date: coerced to date
+    """
+    if target_date is None:
+        return date.today()
+
+    # Already a date/datetime
+    if isinstance(target_date, date) and not isinstance(target_date, datetime):
+        return target_date
+    if isinstance(target_date, datetime):
+        return target_date.date()
+
+    # Epoch seconds
+    if isinstance(target_date, (int, float)):
+        return datetime.utcfromtimestamp(target_date).date()
+
+    # Strings
+    if isinstance(target_date, str):
+        s = target_date.strip()
+        if s == "":
+            return date.today()
+        if s.lower() in {"today", "now"}:
+            return date.today()
+
+        # Try ISO first (YYYY-MM-DD or full ISO datetime)
+        try:
+            # Handles "YYYY-MM-DD" and "YYYY-MM-DDTHH:MM:SS"
+            return datetime.fromisoformat(s).date()
+        except ValueError:
+            pass
+
+        # Common fallbacks
+        for fmt in ("%Y-%m-%d", "%Y%m%d", "%m/%d/%Y", "%m/%d/%y"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+
+    # Last resort: default to today to avoid 500s; log if you have logging
+    return date.today()
 
 # -----------------------------
 # Public function your API will call

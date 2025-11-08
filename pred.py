@@ -13,11 +13,6 @@ from nba_api.stats.endpoints import leaguegamefinder
 from utils import load_state
 import re
 import unicodedata
-import jpype
-if not jpype.isJVMStarted():
-    jpype.startJVM(jpype.getDefaultJVMPath(), "--enable-native-access=ALL-UNNAMED")
-from nbainjuries import injury
-
 
 
 """
@@ -591,7 +586,6 @@ def build_today_features(
     hist_games: pd.DataFrame,
     today_games: pd.DataFrame,
     elo_dict: dict[str, float],
-    lost_elo_dict: dict[str, float],
     HCA: float,
     win_window: int = 10,
     fill_rest: int = 7,
@@ -695,6 +689,11 @@ Getting injury update
 
 
 def update_injuries(t_games, T=None):
+    import jpype
+    if not jpype.isJVMStarted():
+        jpype.startJVM(jpype.getDefaultJVMPath(), "--enable-native-access=ALL-UNNAMED")
+    from nbainjuries import injury
+
     _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     urllib.request.install_opener(
         urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ssl_ctx))
@@ -879,13 +878,39 @@ def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS, INJURIES=False
         hist_games=hist_games,
         today_games=today_games,
         elo_dict=elo_dict,
-        lost_elo_dict=lost_elo_dict,
         HCA=HCA
     )
 
-    FEATURE_COLS = FEATS
+    def _predict_proba_binary(model, X):
+        # 1) Best case: proper predict_proba
+        if hasattr(model, "predict_proba"):
+            proba = model.predict_proba(X)
+            if proba.ndim == 2 and proba.shape[1] >= 2:
+                return proba[:, 1]
+            if proba.ndim == 1:  # some wrappers
+                return proba
+        # 2) decision_function -> squash to (0,1)
+        if hasattr(model, "decision_function"):
+            return expit(model.decision_function(X))
+        # 3) last resort: predict -> normalize to [0,1]
+        yhat = model.predict(X)
+        yhat = yhat.astype(float)
+        rng = yhat.max() - yhat.min()
+        return (yhat - yhat.min()) / (rng if rng > 0 else 1.0)
+    
+    FEATURE_COLS = list(FEATS)
 
-    feat_today["p_home"] = model.predict_proba(feat_today[FEATURE_COLS])[:, 1]
+    # Build X with exact training columns; fill missing with 0.0 and coerce numeric
+    X = feat_today.reindex(columns=FEATURE_COLS)
+    missing = [c for c in FEATURE_COLS if c not in feat_today.columns]
+    if missing:
+        # optional: print or log once so you can see what's missing in Cloud Run logs
+        print(f"[predict_games] Missing features filled with 0: {missing}", flush=True)
+
+    X = X.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
+    # Safe probability extraction
+    feat_today["p_home"] = _predict_proba_binary(model, X)
 
     # --- merge with odds & calibrate ---
     lines = get_nba_lines("9427c941ebf6ab6828ca2582f82cd24b")
