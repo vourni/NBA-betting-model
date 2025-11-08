@@ -1,6 +1,6 @@
 import requests
 url = "https://nba-api-905297400519.us-central1.run.app/predict"
-headers = {"Authorization": "Bearer bigjgondoittoem"}
+headers = {"Authorization": "Bearer bigigondoittoem"}
 payload = {
   "date": "today",
   "bankroll": 100,
