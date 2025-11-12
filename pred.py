@@ -10,7 +10,9 @@ import ssl, urllib.request, certifi
 import warnings
 from scipy.special import logit, expit
 from nba_api.stats.endpoints import leaguegamefinder
+from env_loader import load_env, get_env
 from utils import load_state
+from models.stacker import TwoStageStackTS, PurgedGroupTimeSeriesSplit
 import re
 import os
 import unicodedata
@@ -20,6 +22,9 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+load_env()
+THE_ODDS_API_KEY = get_env("THE_ODDS_API_KEY", required=False)
 
 
 """
@@ -790,14 +795,15 @@ Getting NBA lines for odds comparison
 """
 
 
-def get_nba_lines(the_odds_api_key, region="us", markets="h2h", odds_format="american"):
+def get_nba_lines(the_odds_api_key=None, region="us", markets="h2h", odds_format="american"):
+    api_key = the_odds_api_key or THE_ODDS_API_KEY or get_env("THE_ODDS_API_KEY")
     url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
     params = {
         "regions": region,       
         "markets": markets,       
         "oddsFormat": odds_format, 
         "dateFormat": "iso",
-        "apiKey": the_odds_api_key
+        "apiKey": api_key
     }
     r = requests.get(url, params=params, timeout=20)
     r.raise_for_status()
@@ -997,12 +1003,13 @@ def predict_games(model, theta, elo_dict, hist_games, HCA, FEATS,
 
     # --- Get odds (with consistent date filter) ---
     url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+    api_key = THE_ODDS_API_KEY or get_env("THE_ODDS_API_KEY")
     params = {
         "regions": "us",       
         "markets": "h2h",       
         "oddsFormat": "american", 
         "dateFormat": "iso",
-        "apiKey": "9427c941ebf6ab6828ca2582f82cd24b"
+        "apiKey": api_key
     }
     r = requests.get(url, params=params, timeout=20)
     r.raise_for_status()
@@ -1187,7 +1194,7 @@ def main():
         hist_games=games, 
         HCA=state.params['HCA'], 
         FEATS=FEATS, 
-        INJURIES=False, 
+        INJURIES=True, 
         T=0.25, 
         b=1,
         target_date=target_date  # ← Pass explicit date

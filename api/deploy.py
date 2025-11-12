@@ -5,7 +5,7 @@ Build and deploy the Cloud Run service with one Python command.
 Usage:
   python deploy.py
   # or override defaults:
-  python deploy.py --project-id nba-api-477520 --region us-central1 --service nba-api --api-token bigjgondoittoem
+  python deploy.py --project-id nba-api-477520 --region us-central1 --service nba-api --api-token <token>
 """
 
 import argparse
@@ -14,6 +14,13 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from env_loader import load_env, get_env
 
 def run(cmd: list[str], env: dict | None = None) -> None:
     pretty = " ".join(cmd)
@@ -25,14 +32,20 @@ def run(cmd: list[str], env: dict | None = None) -> None:
         sys.exit(e.returncode)
 
 def main():
+    load_env()
     parser = argparse.ArgumentParser(description="Build & deploy to Cloud Run")
     parser.add_argument("--project-id", default="nba-api-477520")
     parser.add_argument("--region", default="us-central1")
     parser.add_argument("--service", default="nba-api")
-    parser.add_argument("--api-token", default="bigjgondoittoem")  # from your message
+    parser.add_argument("--api-token", default=None,
+                        help="Bearer token for protecting the API (defaults to API_TOKEN env var).")
     parser.add_argument("--image-tag", default="latest",
                         help="Image tag to use (default: latest). You can set to a timestamp/commit SHA if you like.")
     args = parser.parse_args()
+
+    api_token = args.api_token or get_env("API_TOKEN", required=False)
+    if not api_token:
+        raise SystemExit("API_TOKEN is required. Set --api-token or populate the API_TOKEN env var/.env file.")
 
     # Validate gcloud is installed
     if shutil.which("gcloud") is None:
@@ -69,7 +82,7 @@ def main():
         "--region", args.region,
         "--platform", "managed",
         "--allow-unauthenticated",
-        "--update-env-vars", f"API_TOKEN={args.api_token}"
+        "--update-env-vars", f"API_TOKEN={api_token}"
     ], env=env)
 
     print("\n\033[1;32m✅ Deploy complete.\033[0m")

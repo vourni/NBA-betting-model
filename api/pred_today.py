@@ -11,10 +11,14 @@ import threading
 _prediction_lock = threading.Lock()
 
 # ---- import your existing functions/types from your script ----
+from models.stacker import TwoStageStackTS, PurgedGroupTimeSeriesSplit  # ensure pickle-defined classes are importable
 from pred import (
     load_bundle, load_state, merge_games, get_games_so_far,
     update_elo_table, predict_games, get_candidates, TEAM_MAP
 )
+
+# silence unused import warnings when linting
+_STACKER_SENTINEL = (TwoStageStackTS, PurgedGroupTimeSeriesSplit)
 
 def _parse_target_date(target_date: Optional[Union[str, int, float, date, datetime]]) -> date:
     """Robustly convert many incoming types to a date (always Pacific timezone)."""

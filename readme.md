@@ -48,6 +48,19 @@ Utility module with:
 
 ---
 
+## 📈 Performance Snapshot
+
+Latest notebook run (out-of-fold across 2023–24 and 2024–25 data, using the worst available pregame lines) produced:
+
+- `log_loss`: **0.6208**
+- `brier`: **0.2158**
+- `roc_auc`: **0.7053**
+- `accuracy@0.5`: **0.6548**
+
+The same configuration backtests to roughly **4× bankroll growth** under those conservative pricing assumptions, giving a realistic sense of edge when lines are pulled from lower-bound markets.
+
+---
+
 ## 🚀 Why It Matters
 
 This project demonstrates:
@@ -63,4 +76,3 @@ This project demonstrates:
 **James Vournakis**  
 Quantitative Researcher | Financial Mathematics & Statistics  
 Exploring the intersection of sports analytics, data science, and predictive modeling.
-

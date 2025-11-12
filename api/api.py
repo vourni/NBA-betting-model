@@ -1,7 +1,8 @@
 # api.py
 from __future__ import annotations
 
-import os, traceback
+import os, sys, traceback
+from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,6 +10,16 @@ from pydantic import BaseModel
 from datetime import date, datetime
 from typing import Optional, Union, Any
 import threading
+from models.stacker import TwoStageStackTS, PurgedGroupTimeSeriesSplit  # ensure pickle-defined classes are importable
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from env_loader import load_env, get_env
+
+# Avoid unused-import lint errors in tooling
+_STACKER_TYPES = (TwoStageStackTS, PurgedGroupTimeSeriesSplit)
 
 # ===== CRITICAL FIX: Force single-threaded numpy/sklearn =====
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -16,6 +27,8 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+load_env()
 
 app = FastAPI(title="NBA Bets API", version="1.0")
 
@@ -96,7 +109,7 @@ async def startup_event():
         # Don't crash the server, but predictions will fail
 
 # ---- Auth ----
-API_TOKEN = os.environ.get("API_TOKEN", "")
+API_TOKEN = get_env("API_TOKEN", required=False) or ""
 if not API_TOKEN:
     print("[WARN] API_TOKEN not set. Set it in Cloud Run -> Edit & Deploy.")
 
