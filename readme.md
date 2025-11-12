@@ -69,10 +69,3 @@ This project demonstrates:
 - Application of quantitative methods (Elo, logistic probabilities)  
 - Scalable architecture for continuous model evolution  
 
----
-
-## 👨‍💻 Author
-
-**James Vournakis**  
-Quantitative Researcher | Financial Mathematics & Statistics  
-Exploring the intersection of sports analytics, data science, and predictive modeling.
